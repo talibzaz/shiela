@@ -1,0 +1,57 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/node:7.10
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+          docker_layer_caching: true
+
+      - run:
+          name: Install Docker Client
+          command: |
+            set -x
+            VER="17.03.0-ce"
+            curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+            tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+            sudo mv -f /tmp/docker/* /usr/bin
+
+      - run:
+          name: Build Vue app
+          command: |
+            npm install --quiet
+            npm run build
+
+      - run:
+          name: Build and push Docker image
+          command: |
+            TAG=latest
+            docker build -t eventackle/sheila:$TAG .
+            docker login -u eventackle -p $DOCKER_PASSWORD
+            docker push eventackle/sheila:$TAG
+            echo "Docker image for eventackle/sheila pushed to docker hub!"
+
+  deploy:
+    machine: true
+    steps:
+      - checkout
+
+      - run:
+          name: 'Deployment'
+          command: |
+            ssh $SSH_USER@$SSH_HOST "(docker rm -f sheila || true) && docker pull eventackle/sheila"
+            ssh $SSH_USER@$SSH_HOST "docker run -p 80:80 -p 443:443 --name sheila -d eventackle/sheila"
+
+workflows:
+  version: 2
+  build_and_deploy:
+    jobs:
+      - build:
+          filters:
+              branches:
+                only: master
+      - deploy:
+          requires:
+              - build
